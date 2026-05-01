@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+build-scan-data/
+caches/
+daemon/
+native/
+baseline-tasks.txt
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

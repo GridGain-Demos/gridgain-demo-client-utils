@@ -1,0 +1,21 @@
+schema_version: 1
+clusters:
+  - name: trip-cluster
+    namespace: taxi-demo
+    gridgain_major_version: 9
+    contexts:
+      local:
+        addresses:
+          - localhost:10800
+          - localhost:10801
+      in_cluster:
+        addresses:
+          - trip-cluster-0.trip-cluster.taxi-demo.svc.cluster.local:10800
+          - trip-cluster-1.trip-cluster.taxi-demo.svc.cluster.local:10800
+  - name: payment-cluster
+    namespace: taxi-demo
+    gridgain_major_version: 8
+    contexts:
+      in_cluster:
+        addresses:
+          - payment-cluster-0.payment-cluster.taxi-demo.svc.cluster.local:10800
