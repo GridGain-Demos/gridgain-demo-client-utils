@@ -94,3 +94,9 @@ subprojects {
         }
     }
 }
+
+tasks.register("publishStandardImages") {
+    group = "publishing"
+    description = "Build the test-client images via jib and push to the registry specified by -PimageRegistry (default: ghcr.io/gridgain-demos). Credentials come from -PgridgainGhcrUsername / -PgridgainGhcrPassword."
+    dependsOn(":gg8-test-client-image:jib", ":gg9-test-client-image:jib")
+}
