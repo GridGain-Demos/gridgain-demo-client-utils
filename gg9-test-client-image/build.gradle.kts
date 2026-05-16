@@ -28,7 +28,7 @@ dependencies {
 // `jibBuildTar` for air-gapped distribution) or for forks publishing to a
 // private registry.
 val DEFAULT_REGISTRY = "ghcr.io/gridgain-demos"
-val SOURCE_REPO_URL  = "https://github.com/GridGain-Demos/gridgain-client-utils"
+val SOURCE_REPO_URL  = "https://github.com/GridGain-Demos/gridgain-demo-client-utils"
 
 val imageRegistry = ((findProperty("imageRegistry") as String?)?.trimEnd('/'))
     ?.takeIf { it.isNotBlank() }
@@ -60,6 +60,13 @@ jib {
     }
     container {
         mainClass = "com.gridgain.demo.client.gg9.TestClientV9"
+        // Bake the same JVM flags as the GG8 image. GG9's new thin client doesn't need
+        // them but harmlessly ignores them; keeping the flag set unconditional matches
+        // the plugin's local-fork ConnectTestClient pattern.
+        jvmFlags = listOf(
+            "--add-opens=java.base/java.nio=ALL-UNNAMED",
+            "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        )
         labels.set(mapOf(
             "org.opencontainers.image.title"       to "GridGain Demo Test Client (GG9)",
             "org.opencontainers.image.version"     to imageTag,

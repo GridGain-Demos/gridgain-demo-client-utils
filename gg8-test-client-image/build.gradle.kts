@@ -28,7 +28,7 @@ dependencies {
 // `jibBuildTar` for air-gapped distribution) or for forks publishing to a
 // private registry.
 val DEFAULT_REGISTRY = "ghcr.io/gridgain-demos"
-val SOURCE_REPO_URL  = "https://github.com/GridGain-Demos/gridgain-client-utils"
+val SOURCE_REPO_URL  = "https://github.com/GridGain-Demos/gridgain-demo-client-utils"
 
 val imageRegistry = ((findProperty("imageRegistry") as String?)?.trimEnd('/'))
     ?.takeIf { it.isNotBlank() }
@@ -60,6 +60,15 @@ jib {
     }
     container {
         mainClass = "com.gridgain.demo.client.gg8.TestClientV8"
+        // Ignite's GridUnsafe static init reflects on java.nio.Buffer.address and direct-buffer
+        // cleaners; Java 9+ blocks that unless these opens are explicit on the JVM. Baked in
+        // here so every consumer of this image (the plugin's Job manifest, manual `kubectl run`,
+        // ad-hoc debugging via `docker run`) inherits the flags from the image's entrypoint
+        // without having to set JAVA_TOOL_OPTIONS at deploy time.
+        jvmFlags = listOf(
+            "--add-opens=java.base/java.nio=ALL-UNNAMED",
+            "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        )
         labels.set(mapOf(
             "org.opencontainers.image.title"       to "GridGain Demo Test Client (GG8)",
             "org.opencontainers.image.version"     to imageTag,
