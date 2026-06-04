@@ -98,9 +98,9 @@ registry entirely:
 ```bash
 cd gridgain-demo-client-utils
 ./gradlew :gg9-test-client-image:jibDockerBuild -PimageRegistry=local
-kind load docker-image local/demo-test-client-gg9:0.0.5-SNAPSHOT --name <cluster>
-# minikube image load local/demo-test-client-gg9:0.0.5-SNAPSHOT
-# k3d image import local/demo-test-client-gg9:0.0.5-SNAPSHOT -c <cluster>
+kind load docker-image local/demo-test-client-gg9:0.5.0-SNAPSHOT --name <cluster>
+# minikube image load local/demo-test-client-gg9:0.5.0-SNAPSHOT
+# k3d image import local/demo-test-client-gg9:0.5.0-SNAPSHOT -c <cluster>
 
 cd ../<your-demo-project>
 ./gradlew deployCluster -PelementName=<cluster> -PimageRegistry=local
@@ -187,8 +187,8 @@ public:
 2. Find `demo-test-client-gg8` and `demo-test-client-gg9`
 3. **Package settings** → **Change visibility** → Public
 4. While there, link each package to
-   https://github.com/GridGain-Demos/gridgain-client-utils so the package
-   page shows the source repo.
+   https://github.com/GridGain-Demos/gridgain-demo-client-utils so the
+   package page shows the source repo.
 
 This is one-time per package. Subsequent pushes inherit the visibility.
 
