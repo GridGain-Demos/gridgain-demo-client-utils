@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
 
 allprojects {
     group = "com.gridgain.demo"
-    version = "0.6.0-SNAPSHOT"
+    version = "0.7.0-SNAPSHOT"
 }
 
 subprojects {
