@@ -137,9 +137,10 @@ class AddressResolutionTest {
         // A degenerate case: 'local' present but with an empty addresses list.
         // Production code treats this the same as missing.
         String yaml = """
-            schema_version: 1
+            schema_version: 2
             clusters:
               - name: trip-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:
@@ -173,9 +174,10 @@ class AddressResolutionTest {
 
     private static Path writeMultiClusterFixture(Path dir) throws IOException {
         String yaml = """
-            schema_version: 1
+            schema_version: 2
             clusters:
               - name: trip-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:
@@ -188,6 +190,7 @@ class AddressResolutionTest {
                       - trip-cluster-0.svc.cluster.local:10800
                       - trip-cluster-1.svc.cluster.local:10800
               - name: payment-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 8
                 contexts:

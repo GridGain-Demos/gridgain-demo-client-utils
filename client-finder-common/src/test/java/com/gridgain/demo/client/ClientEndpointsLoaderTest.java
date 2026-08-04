@@ -15,9 +15,10 @@ class ClientEndpointsLoaderTest {
     @Test
     void loadsValidYaml(@TempDir Path tmp) throws IOException {
         Path file = writeFixture(tmp, """
-            schema_version: 1
+            schema_version: 2
             clusters:
               - name: trip-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:
@@ -33,7 +34,7 @@ class ClientEndpointsLoaderTest {
 
         ClientEndpoints endpoints = ClientEndpointsLoader.load(file);
 
-        assertThat(endpoints.getSchemaVersion()).isEqualTo(1);
+        assertThat(endpoints.getSchemaVersion()).isEqualTo(2);
         assertThat(endpoints.getClusters()).hasSize(1);
         ClientEndpoints.Cluster cluster = endpoints.getClusters().get(0);
         assertThat(cluster.getName()).isEqualTo("trip-cluster");
@@ -49,9 +50,10 @@ class ClientEndpointsLoaderTest {
     @Test
     void allowsLocalContextToBeOmitted(@TempDir Path tmp) throws IOException {
         Path file = writeFixture(tmp, """
-            schema_version: 1
+            schema_version: 2
             clusters:
               - name: backend-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 8
                 contexts:
@@ -69,11 +71,12 @@ class ClientEndpointsLoaderTest {
     }
 
     @Test
-    void throwsSchemaVersionMismatchOnVersion2(@TempDir Path tmp) throws IOException {
+    void throwsSchemaVersionMismatchOnAnUnknownVersion(@TempDir Path tmp) throws IOException {
         Path file = writeFixture(tmp, """
-            schema_version: 2
+            schema_version: 3
             clusters:
               - name: trip-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:
@@ -84,16 +87,150 @@ class ClientEndpointsLoaderTest {
 
         assertThatThrownBy(() -> ClientEndpointsLoader.load(file))
             .isInstanceOf(SchemaVersionMismatchException.class)
+            .hasMessageContaining("schema_version=3")
             .hasMessageContaining("schema_version=2")
-            .hasMessageContaining("schema_version=1")
             .hasMessageContaining("lock-step");
+    }
+
+    @Test
+    void loadsAHostClusterWithNoNamespaceAndNoInClusterContext(@TempDir Path tmp) throws IOException {
+        Path file = writeFixture(tmp, """
+            schema_version: 2
+            clusters:
+              - name: payments
+                deployment_kind: hosts
+                gridgain_major_version: 8
+                contexts:
+                  local:
+                    addresses:
+                      - 10.30.0.11:10800
+                      - 10.30.0.12:10800
+            """);
+
+        ClientEndpoints endpoints = ClientEndpointsLoader.load(file);
+
+        ClientEndpoints.Cluster cluster = endpoints.findCluster("payments");
+        assertThat(cluster.getDeploymentKind()).isEqualTo(ClientEndpoints.DeploymentKind.HOSTS);
+        // Null rather than a placeholder: a collection of machines has no namespace, and inventing one
+        // would put a meaningless Kubernetes value in a non-Kubernetes record.
+        assertThat(cluster.getNamespace()).isNull();
+        // No headless-service view to be a second opinion about — a client is either on the machines'
+        // network or it is not, and either way it dials the same advertised addresses.
+        assertThat(cluster.getContexts().getInCluster()).isNull();
+        assertThat(cluster.getContexts().getLocal().getAddresses())
+            .containsExactly("10.30.0.11:10800", "10.30.0.12:10800");
+    }
+
+    @Test
+    void askingAHostClusterForANamespaceExplainsWhyThereIsNone(@TempDir Path tmp) throws IOException {
+        Path file = writeFixture(tmp, """
+            schema_version: 2
+            clusters:
+              - name: payments
+                deployment_kind: hosts
+                gridgain_major_version: 8
+                contexts:
+                  local:
+                    addresses:
+                      - 10.30.0.11:10800
+            """);
+
+        ClientEndpoints.Cluster cluster = ClientEndpointsLoader.load(file).findCluster("payments");
+
+        assertThatThrownBy(cluster::requireNamespace)
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("payments")
+            .hasMessageContaining("hosts")
+            .hasMessageContaining("getDeploymentKind()");
+    }
+
+    @Test
+    void aKubernetesClusterStillHasToDeclareItsNamespace(@TempDir Path tmp) throws IOException {
+        Path file = writeFixture(tmp, """
+            schema_version: 2
+            clusters:
+              - name: trip-cluster
+                deployment_kind: k8s
+                gridgain_major_version: 9
+                contexts:
+                  in_cluster:
+                    addresses:
+                      - a:1
+            """);
+
+        // Enforced per kind rather than relaxed for everyone: a Kubernetes entry missing its namespace is
+        // still the malformed file it always was.
+        assertThatThrownBy(() -> ClientEndpointsLoader.load(file))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("'namespace'")
+            .hasMessageContaining("clusters[0]");
+    }
+
+    @Test
+    void rejectsAMissingDeploymentKind(@TempDir Path tmp) throws IOException {
+        Path file = writeFixture(tmp, """
+            schema_version: 2
+            clusters:
+              - name: trip-cluster
+                namespace: taxi-demo
+                gridgain_major_version: 9
+                contexts:
+                  in_cluster:
+                    addresses:
+                      - a:1
+            """);
+
+        // Required rather than defaulted to k8s: assuming a kind would mis-read a host cluster as a
+        // Kubernetes one missing its namespace, which sends the reader looking in the wrong place.
+        assertThatThrownBy(() -> ClientEndpointsLoader.load(file))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("'deployment_kind'");
+    }
+
+    @Test
+    void rejectsAnUnknownDeploymentKindByNamingTheOnesItKnows(@TempDir Path tmp) throws IOException {
+        Path file = writeFixture(tmp, """
+            schema_version: 2
+            clusters:
+              - name: trip-cluster
+                deployment_kind: swarm
+                gridgain_major_version: 9
+                contexts:
+                  local:
+                    addresses:
+                      - a:1
+            """);
+
+        // A kind this library does not know means the plugin is newer than the library, and the message
+        // says so rather than failing on whichever field the unknown kind happens to omit.
+        assertThatThrownBy(() -> ClientEndpointsLoader.load(file))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("swarm")
+            .hasMessageContaining("k8s, hosts")
+            .hasMessageContaining("Upgrade the client-utils dependency");
+    }
+
+    @Test
+    void rejectsAnEntryWithNoReachableContext(@TempDir Path tmp) throws IOException {
+        Path file = writeFixture(tmp, """
+            schema_version: 2
+            clusters:
+              - name: trip-cluster
+                deployment_kind: hosts
+                gridgain_major_version: 8
+                contexts: {}
+            """);
+
+        assertThatThrownBy(() -> ClientEndpointsLoader.load(file))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("names a cluster nothing can reach");
     }
 
     @Test
     void rejectsMalformedYaml(@TempDir Path tmp) throws IOException {
         Path file = tmp.resolve("client-endpoints.yaml");
         // The colon followed by a quote with no closing quote is unambiguously broken.
-        Files.writeString(file, "schema_version: 1\nclusters: [\nname: \"unterminated\n", StandardCharsets.UTF_8);
+        Files.writeString(file, "schema_version: 2\nclusters: [\nname: \"unterminated\n", StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> ClientEndpointsLoader.load(file))
             .isInstanceOf(IllegalArgumentException.class)
@@ -115,6 +252,7 @@ class ClientEndpointsLoaderTest {
         Path file = writeFixture(tmp, """
             clusters:
               - name: x
+                deployment_kind: k8s
                 namespace: y
                 gridgain_major_version: 9
                 contexts:
@@ -131,9 +269,10 @@ class ClientEndpointsLoaderTest {
     @Test
     void rejectsMissingClusterName(@TempDir Path tmp) throws IOException {
         Path file = writeFixture(tmp, """
-            schema_version: 1
+            schema_version: 2
             clusters:
-              - namespace: taxi-demo
+              - deployment_kind: k8s
+                namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:
                   in_cluster:
@@ -158,9 +297,10 @@ class ClientEndpointsLoaderTest {
     @Test
     void multipleClustersFindsCorrectOne(@TempDir Path tmp) throws IOException {
         Path file = writeFixture(tmp, """
-            schema_version: 1
+            schema_version: 2
             clusters:
               - name: trip-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:
@@ -168,6 +308,7 @@ class ClientEndpointsLoaderTest {
                     addresses:
                       - a:1
               - name: payment-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 8
                 contexts:
@@ -184,9 +325,10 @@ class ClientEndpointsLoaderTest {
     @Test
     void findClusterThrowsWithAvailableNames(@TempDir Path tmp) throws IOException {
         Path file = writeFixture(tmp, """
-            schema_version: 1
+            schema_version: 2
             clusters:
               - name: trip-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:

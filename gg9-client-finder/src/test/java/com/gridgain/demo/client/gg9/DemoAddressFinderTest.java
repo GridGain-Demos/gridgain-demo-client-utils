@@ -141,9 +141,10 @@ class DemoAddressFinderTest {
      */
     private static Path writeFixture(Path dir) throws IOException {
         String yaml = """
-            schema_version: 1
+            schema_version: 2
             clusters:
               - name: trip-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 9
                 contexts:
@@ -156,6 +157,7 @@ class DemoAddressFinderTest {
                       - trip-cluster-0.svc.cluster.local:10800
                       - trip-cluster-1.svc.cluster.local:10800
               - name: payment-cluster
+                deployment_kind: k8s
                 namespace: taxi-demo
                 gridgain_major_version: 8
                 contexts:

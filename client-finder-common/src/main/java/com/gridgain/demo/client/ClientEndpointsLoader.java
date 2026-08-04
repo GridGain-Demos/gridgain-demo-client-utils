@@ -18,12 +18,22 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
  *
  * <p>The expected schema version is {@value #EXPECTED_SCHEMA_VERSION}. A
  * mismatch throws {@link SchemaVersionMismatchException} (no silent
- * migration).</p>
+ * migration). The version is what makes a plugin/client-utils skew report itself
+ * plainly: a library expecting version 1 refuses a version 2 file outright
+ * rather than reporting a missing {@code namespace} on a host cluster that
+ * never had one.</p>
  */
 public final class ClientEndpointsLoader {
 
-    /** The only schema version this client library understands. */
-    public static final int EXPECTED_SCHEMA_VERSION = 1;
+    /**
+     * The only schema version this client library understands.
+     *
+     * <p>Version 2 introduced the required {@code deployment_kind} discriminator and made
+     * {@code namespace} and {@code contexts.in_cluster} specific to Kubernetes clusters, so that a
+     * cluster deployed to a collection of machines is described in its own terms rather than as a
+     * Kubernetes cluster missing fields.</p>
+     */
+    public static final int EXPECTED_SCHEMA_VERSION = 2;
 
     private ClientEndpointsLoader() {
         // utility class

@@ -83,16 +83,60 @@ public final class ClientEndpoints {
         return new ClientEndpoints(version, clusters);
     }
 
+    /**
+     * How a cluster is deployed, which decides what else its entry carries.
+     *
+     * <p>Declared in the file rather than inferred from which fields are present: an absent
+     * {@code namespace} could equally mean a host cluster or a truncated file, and the two need
+     * different responses.</p>
+     */
+    public enum DeploymentKind {
+        /** Deployed to Kubernetes: has a namespace and an in-cluster context. */
+        K8S("k8s"),
+        /** Deployed to a collection of machines: has neither. */
+        HOSTS("hosts");
+
+        private final String wire;
+
+        DeploymentKind(String wire) {
+            this.wire = wire;
+        }
+
+        public String getWire() {
+            return wire;
+        }
+
+        static DeploymentKind fromWire(String value, String path) {
+            for (DeploymentKind kind : values()) {
+                if (kind.wire.equals(value)) {
+                    return kind;
+                }
+            }
+            throw new IllegalArgumentException(
+                "Field 'deployment_kind' at " + path + " is '" + value
+                    + "', which this version of gridgain-demo-client-utils does not recognise. "
+                    + "Known kinds: k8s, hosts. Upgrade the client-utils dependency to match the "
+                    + "plugin that wrote client-endpoints.yaml.");
+        }
+    }
+
     /** A single cluster entry from the file. */
     public static final class Cluster {
         private final String name;
-        private final String namespace;
+        private final DeploymentKind deploymentKind;
+        private final String namespace; // nullable: Kubernetes only
         private final int gridgainMajorVersion;
         private final Contexts contexts;
 
-        public Cluster(String name, String namespace, int gridgainMajorVersion, Contexts contexts) {
+        public Cluster(
+            String name,
+            DeploymentKind deploymentKind,
+            String namespace,
+            int gridgainMajorVersion,
+            Contexts contexts) {
             this.name = Objects.requireNonNull(name, "name");
-            this.namespace = Objects.requireNonNull(namespace, "namespace");
+            this.deploymentKind = Objects.requireNonNull(deploymentKind, "deploymentKind");
+            this.namespace = namespace;
             this.gridgainMajorVersion = gridgainMajorVersion;
             this.contexts = Objects.requireNonNull(contexts, "contexts");
         }
@@ -101,7 +145,34 @@ public final class ClientEndpoints {
             return name;
         }
 
+        public DeploymentKind getDeploymentKind() {
+            return deploymentKind;
+        }
+
+        /**
+         * The Kubernetes namespace, or {@code null} for a cluster on a collection of machines.
+         *
+         * <p>Null rather than a placeholder: a collection of machines has no namespace, and inventing
+         * one would put a meaningless Kubernetes value in a non-Kubernetes record. Callers that
+         * genuinely need a namespace should use {@link #requireNamespace()}, which explains the
+         * situation instead of returning something unusable.</p>
+         */
         public String getNamespace() {
+            return namespace;
+        }
+
+        /**
+         * The Kubernetes namespace, or a clear failure if this cluster has none.
+         *
+         * @throws IllegalStateException if this cluster is not deployed to Kubernetes
+         */
+        public String requireNamespace() {
+            if (namespace == null) {
+                throw new IllegalStateException(
+                    "Cluster '" + name + "' is deployed to " + deploymentKind.getWire()
+                        + ", which has no Kubernetes namespace. Check getDeploymentKind() before "
+                        + "asking for a namespace, or connect using the addresses in its contexts.");
+            }
             return namespace;
         }
 
@@ -116,7 +187,14 @@ public final class ClientEndpoints {
         @SuppressWarnings("unchecked")
         static Cluster fromMap(Map<String, Object> map, String path) {
             String name = requireString(requireKey(map, "name", path), "name", path);
-            String namespace = requireString(requireKey(map, "namespace", path), "namespace", path);
+            DeploymentKind kind = DeploymentKind.fromWire(
+                requireString(requireKey(map, "deployment_kind", path), "deployment_kind", path), path);
+            // Required for Kubernetes, absent for hosts. Enforced per kind rather than universally, so a
+            // Kubernetes entry missing its namespace is still reported as the malformed file it is.
+            String namespace = null;
+            if (kind == DeploymentKind.K8S) {
+                namespace = requireString(requireKey(map, "namespace", path), "namespace", path);
+            }
             int major = toInt(requireKey(map, "gridgain_major_version", path), "gridgain_major_version", path);
             Object contextsObj = requireKey(map, "contexts", path);
             if (!(contextsObj instanceof Map)) {
@@ -125,29 +203,37 @@ public final class ClientEndpoints {
                         + describeType(contextsObj) + ".");
             }
             Contexts contexts = Contexts.fromMap((Map<String, Object>) contextsObj, path + ".contexts");
-            return new Cluster(name, namespace, major, contexts);
+            return new Cluster(name, kind, namespace, major, contexts);
         }
     }
 
     /**
-     * Container for the per-context address blocks. {@link #local} is
-     * deliberately nullable: the plugin omits it entirely when the cluster
-     * was deployed without demo_access enabled.
+     * Container for the per-context address blocks.
+     *
+     * <p>Both fields are nullable, for different reasons. {@link #local} is absent when a Kubernetes
+     * cluster was deployed without demo_access. {@link #inCluster} is absent for a cluster on a
+     * collection of machines, which has no headless-service view to be a second opinion about — a client
+     * is either on the machines' network or it is not, and either way it dials the same addresses.</p>
+     *
+     * <p>At least one is always present. The plugin will not write an entry naming a cluster nothing
+     * can reach, and {@link AddressResolution} reports the available contexts when the one it needs is
+     * missing.</p>
      */
     public static final class Contexts {
         private final Addresses local; // nullable: absent when demo_access disabled at deploy time
-        private final Addresses inCluster;
+        private final Addresses inCluster; // nullable: absent for host clusters
 
         public Contexts(Addresses local, Addresses inCluster) {
             this.local = local;
-            this.inCluster = Objects.requireNonNull(inCluster, "inCluster");
+            this.inCluster = inCluster;
         }
 
-        /** May return {@code null} if the cluster was deployed without demo_access. */
+        /** May return {@code null} if a Kubernetes cluster was deployed without demo_access. */
         public Addresses getLocal() {
             return local;
         }
 
+        /** May return {@code null} for a cluster deployed to a collection of machines. */
         public Addresses getInCluster() {
             return inCluster;
         }
@@ -168,13 +254,26 @@ public final class ClientEndpoints {
                     local = Addresses.fromMap((Map<String, Object>) localObj, path + ".local");
                 }
             }
-            Object inClusterObj = requireKey(map, "in_cluster", path);
-            if (!(inClusterObj instanceof Map)) {
-                throw new IllegalArgumentException(
-                    "Field 'in_cluster' at " + path + " must be a YAML map, but was "
-                        + describeType(inClusterObj) + ".");
+            Addresses inCluster = null;
+            if (map.containsKey("in_cluster")) {
+                Object inClusterObj = map.get("in_cluster");
+                if (inClusterObj == null) {
+                    inCluster = null;
+                } else if (!(inClusterObj instanceof Map)) {
+                    throw new IllegalArgumentException(
+                        "Field 'in_cluster' at " + path + " must be a YAML map (or omitted), but was "
+                            + describeType(inClusterObj) + ".");
+                } else {
+                    inCluster = Addresses.fromMap(
+                        (Map<String, Object>) inClusterObj, path + ".in_cluster");
+                }
             }
-            Addresses inCluster = Addresses.fromMap((Map<String, Object>) inClusterObj, path + ".in_cluster");
+            if (local == null && inCluster == null) {
+                throw new IllegalArgumentException(
+                    "Neither 'local' nor 'in_cluster' is present at " + path
+                        + ". An entry with no contexts names a cluster nothing can reach. Re-run the "
+                        + "plugin deploy task to regenerate client-endpoints.yaml.");
+            }
             return new Contexts(local, inCluster);
         }
     }
