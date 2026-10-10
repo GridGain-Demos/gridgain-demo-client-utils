@@ -175,6 +175,70 @@ class TestClientV9Test {
             .contains("Dry run complete");
     }
 
+    @Test
+    void run_withCountButNoTableName_returnsUsageExitCode() {
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV9.run(new String[]{"trip-cluster", "--count"}, out, err);
+
+        assertThat(exit).isEqualTo(64);
+        assertThat(errBytes.toString(StandardCharsets.UTF_8)).contains("--count");
+    }
+
+    @Test
+    void run_withCountAndDryRun_isRefusedWithAReason() {
+        // Not silently ignored. A dry run never opens a connection, so a count it accepted and did
+        // not perform would report "0 rows" or nothing at all — and the caller is running this
+        // precisely to find out whether rows arrived.
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV9.run(
+            new String[]{"trip-cluster", "--dry-run", "--count", "CUSTOMER"}, out, err);
+
+        assertThat(exit).isEqualTo(64);
+        String errOut = errBytes.toString(StandardCharsets.UTF_8);
+        assertThat(errOut).contains("--dry-run").contains("--count");
+    }
+
+    @Test
+    void run_withUnusableTableName_saysWhatIsAllowed() {
+        // Rejected before any connection is attempted, so the caller gets the rule rather than a
+        // SQL parse error quoting a query they never wrote.
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV9.run(
+            new String[]{"trip-cluster", "--count", "CUSTOMER; DROP TABLE ACCOUNT"}, out, err);
+
+        assertThat(exit).isEqualTo(64);
+        assertThat(errBytes.toString(StandardCharsets.UTF_8))
+            .contains("CUSTOMER; DROP TABLE ACCOUNT")
+            .contains("letters");
+    }
+
+    @Test
+    void run_withCountOnAnUnknownCluster_failsBeforeConnecting(@TempDir Path tmp) throws IOException {
+        // Address resolution still runs first, so a mistyped cluster name is reported as such
+        // rather than as a failure to count.
+        Path file = writeFixture(tmp);
+        System.setProperty(EndpointsFileLocator.SYSTEM_PROPERTY, file.toString());
+        System.setProperty(RuntimeContext.SYSTEM_PROPERTY, "local");
+
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV9.run(new String[]{"not-a-cluster", "--count", "CUSTOMER"}, out, err);
+
+        assertThat(exit).isNotZero();
+        assertThat(errBytes.toString(StandardCharsets.UTF_8)).contains("not-a-cluster");
+    }
+
     private static Path writeFixture(Path dir) throws IOException {
         String yaml = """
             schema_version: 2

@@ -175,6 +175,65 @@ class TestClientV8Test {
             .contains("Dry run complete");
     }
 
+    @Test
+    void run_withCountButNoCacheName_returnsUsageExitCode() {
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV8.run(new String[]{"payment-cluster", "--count"}, out, err);
+
+        assertThat(exit).isEqualTo(64);
+        assertThat(errBytes.toString(StandardCharsets.UTF_8)).contains("--count");
+    }
+
+    @Test
+    void run_withCountAndDryRun_isRefusedWithAReason() {
+        // See the GG9 client: a dry run opens nothing, so a count it accepted and skipped would
+        // print no number where the caller is waiting for one.
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV8.run(
+            new String[]{"payment-cluster", "--dry-run", "--count", "customer-cache"}, out, err);
+
+        assertThat(exit).isEqualTo(64);
+        String errOut = errBytes.toString(StandardCharsets.UTF_8);
+        assertThat(errOut).contains("--dry-run").contains("--count");
+    }
+
+    @Test
+    void run_withUnusableCacheName_saysWhatIsAllowed() {
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV8.run(
+            new String[]{"payment-cluster", "--count", "cache name with spaces"}, out, err);
+
+        assertThat(exit).isEqualTo(64);
+        assertThat(errBytes.toString(StandardCharsets.UTF_8))
+            .contains("cache name with spaces")
+            .contains("letters");
+    }
+
+    @Test
+    void run_withCountOnAnUnknownCluster_failsBeforeConnecting(@TempDir Path tmp) throws IOException {
+        Path file = writeFixture(tmp);
+        System.setProperty(EndpointsFileLocator.SYSTEM_PROPERTY, file.toString());
+        System.setProperty(RuntimeContext.SYSTEM_PROPERTY, "local");
+
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+        PrintStream out = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+        PrintStream err = new PrintStream(errBytes, true, StandardCharsets.UTF_8);
+
+        int exit = TestClientV8.run(new String[]{"not-a-cluster", "--count", "customer-cache"}, out, err);
+
+        assertThat(exit).isNotZero();
+        assertThat(errBytes.toString(StandardCharsets.UTF_8)).contains("not-a-cluster");
+    }
+
     private static Path writeFixture(Path dir) throws IOException {
         String yaml = """
             schema_version: 2
