@@ -56,10 +56,25 @@ jobs:
       # jib reads gridgainGhcrUsername / gridgainGhcrPassword when both are set, and otherwise
       # falls through to credential helpers that do not exist on a runner. GITHUB_TOKEN is scoped
       # to this repository and expires with the job, so nothing durable is written anywhere.
+      # jib wraps every registry failure in the same generic sentence, so probe GHCR directly
+      # first: this prints the actual HTTP status and GitHub's own error body, which is the only
+      # thing that distinguishes "cannot create a package" from a credential problem.
+      - name: Probe GHCR push permission for this token
+        run: |
+          set +e
+          for REPO in gridgain-demos/demo-test-client-gg9 gridgain-demos/demo-test-client-gg8; do
+            TOK=$(curl -s -u "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:$REPO:push,pull" \
+              | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
+            OUT=$(curl -s -o /tmp/body -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $TOK" "https://ghcr.io/v2/$REPO/blobs/uploads/")
+            echo "  $REPO -> HTTP $OUT   $(cat /tmp/body)"
+          done
+
       - name: Publish gg9 test client
         if: ${{ inputs.image == 'gg9' || inputs.image == 'both' }}
         run: >
-          ./gradlew :gg9-test-client-image:jib
+          ./gradlew :gg9-test-client-image:jib --stacktrace
           -PgridgainGhcrUsername=${{ github.actor }}
           -PgridgainGhcrPassword=${{ secrets.GITHUB_TOKEN }}
           -PimageTag=${{ inputs.version }}
@@ -67,7 +82,7 @@ jobs:
       - name: Publish gg8 test client
         if: ${{ inputs.image == 'gg8' || inputs.image == 'both' }}
         run: >
-          ./gradlew :gg8-test-client-image:jib
+          ./gradlew :gg8-test-client-image:jib --stacktrace
           -PgridgainGhcrUsername=${{ github.actor }}
           -PgridgainGhcrPassword=${{ secrets.GITHUB_TOKEN }}
           -PimageTag=${{ inputs.version }}
