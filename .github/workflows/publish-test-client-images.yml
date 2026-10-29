@@ -1,0 +1,79 @@
+# Publish the test-client images to GHCR.
+#
+# Why this exists rather than a developer pushing from a laptop:
+#
+# GHCR grants push permission PER PACKAGE, and creating a NEW package under the
+# gridgain-demos org requires org-owner rights that the people who build these images do not
+# have. A laptop push to a name that does not exist yet fails with
+#   403 {"code":"DENIED","message":"permission_denied: write_package"}
+# and there is no "create a package" button in the GitHub UI — a package only comes into
+# existence when something pushes to its name.
+#
+# A workflow's GITHUB_TOKEN acts as the REPOSITORY, not as the person who dispatched it, and is
+# allowed to create a package owned by this repo's org. The package it creates is linked back to
+# this repository, which is also what gives it sensible default access for everyone with rights
+# here.
+#
+# Manual dispatch only: images are published as part of a release
+# (gridgain-demo-gradle-plugin/bin/bump-version.sh --publish), and this is the escape hatch for
+# the first push of a name that does not exist yet.
+name: Publish test-client images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Which image to publish
+        required: true
+        default: gg9
+        type: choice
+        options: [gg9, gg8, both]
+      version:
+        description: Version tag to publish (must match the project version)
+        required: true
+        default: 0.8.0-SNAPSHOT
+        type: string
+
+permissions:
+  contents: read
+  packages: write   # the whole point: lets GITHUB_TOKEN create and push the package
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # jib reads gridgainGhcrUsername / gridgainGhcrPassword when both are set, and otherwise
+      # falls through to credential helpers that do not exist on a runner. GITHUB_TOKEN is scoped
+      # to this repository and expires with the job, so nothing durable is written anywhere.
+      - name: Publish gg9 test client
+        if: ${{ inputs.image == 'gg9' || inputs.image == 'both' }}
+        run: >
+          ./gradlew :gg9-test-client-image:jib
+          -PgridgainGhcrUsername=${{ github.actor }}
+          -PgridgainGhcrPassword=${{ secrets.GITHUB_TOKEN }}
+          -PimageTag=${{ inputs.version }}
+
+      - name: Publish gg8 test client
+        if: ${{ inputs.image == 'gg8' || inputs.image == 'both' }}
+        run: >
+          ./gradlew :gg8-test-client-image:jib
+          -PgridgainGhcrUsername=${{ github.actor }}
+          -PgridgainGhcrPassword=${{ secrets.GITHUB_TOKEN }}
+          -PimageTag=${{ inputs.version }}
+
+      - name: Say what to do next
+        run: |
+          echo "A package created here is PRIVATE and linked to this repository."
+          echo "To let maintainers push it from a laptop afterwards, an org owner (or a repo"
+          echo "admin, via the package's own settings) should confirm the package's access list."
