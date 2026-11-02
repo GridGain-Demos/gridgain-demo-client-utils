@@ -71,6 +71,7 @@ jib {
             "org.opencontainers.image.title"       to "GridGain Demo Test Client (GG9)",
             "org.opencontainers.image.version"     to imageTag,
             "org.opencontainers.image.source"      to SOURCE_REPO_URL,
+            "org.opencontainers.image.licenses"    to "BSD-3-Clause",
             "org.opencontainers.image.description" to "Built-in test client for GridGain 9 demos. Validates per-node reachability via the demo plugin's client-endpoints ConfigMap.",
             "org.gridgain.demo.major-version"      to "9",
         ))
